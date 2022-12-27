@@ -388,6 +388,11 @@ def _export_to_prometheus(name, metric, labels):
     value = labels['value']
     del labels['value']
 
+    if metric.get('dequote', False):
+        if type(value) == str:
+            value = value.replace('"', '')
+            value = value.replace('\'', '')
+
     sorted_labels = _get_sorted_tuple_list(labels)
     label_names, label_values = list(zip(*sorted_labels))
 

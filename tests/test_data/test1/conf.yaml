@@ -65,6 +65,7 @@ metrics:
   - name: "fhem_rain_mm"
     help: "443 Mhz Sensors, rain in mm/m2"
     type: "counter"
+    dequote: true
     topic: "fhem/+/+/rain_total"
     label_configs:
       - source_labels:  ['__msg_topic__']
