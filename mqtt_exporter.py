@@ -427,6 +427,8 @@ def _mqtt_init(mqtt_config, metrics):
 
 def _export_to_prometheus(name, metric, labels):
     """Export metric and labels to prometheus."""
+    skipped_metric_types = ['lookup_table']
+
     metric_wrappers = {'gauge': GaugeWrapper,
                        'counter': CounterWrapper,
                        'counter_absolute': CounterAbsoluteWrapper,
@@ -435,6 +437,10 @@ def _export_to_prometheus(name, metric, labels):
                        'enum': EnumWrapper,
                     }
     valid_types = metric_wrappers.keys()
+
+    if metric['type'] in skipped_metric_types:
+        return
+
     if metric['type'] not in valid_types:
         logging.error(
             f"Metric type: {metric['type']}, is not a valid metric type. Must be one of: {valid_types} - ingnoring"
