@@ -3,3 +3,4 @@ prometheus-client==0.11.0
 PyYAML==5.4.1
 six==1.16.0
 yamlreader==3.0.4
+jmespath==1.0.1

@@ -13,6 +13,7 @@ import signal
 import sys
 import paho.mqtt.client as mqtt
 import yaml
+import jmespath
 import prometheus_client as prometheus
 from yamlreader import yaml_load
 import utils.prometheus_additions
@@ -113,6 +114,10 @@ def parse_and_validate_metric_config(metric, metrics):
                 if lc['action'] == 'replace':
                     _validate_required_fields(lc, None,
                                               ['source_labels', 'target_label', 'separator', 'regex', 'replacement',
+                                               'action'])
+                elif lc['action'] == 'jmespath':
+                    _validate_required_fields(lc, None,
+                                              ['source_labels', 'target_label', 'separator', 'path',
                                                'action'])
                 else:
                     _validate_required_fields(lc, None,
@@ -243,6 +248,8 @@ def _apply_label_config(labels, label_configs):
     for label_config in label_configs:
         if label_config['action'] == 'replace':
             _label_config_rename(label_config, labels)
+        elif label_config['action'] == 'jmespath':
+            _label_config_jmespath(label_config, labels)
         else:
             if not _label_config_match(label_config, labels):
                 return False
@@ -260,6 +267,22 @@ def _label_config_rename(label_config, labels):
                         label_config['replacement'], source)
         logging.debug(f'_label_config_rename result: {result}')
         labels[label_config['target_label']] = result
+
+
+def _label_config_jmespath(label_config, labels):
+    """Action 'jmespath' in label_config: Extract value for label 'target_label'"""
+    source = label_config['separator'].join(
+        [labels[x] for x in label_config['source_labels']])
+    source = json.loads(source)
+
+    result = jmespath.search(label_config['path'], source)
+
+    if result:
+        logging.debug(f'_label_config_jmespath source: {source}')
+        logging.debug(f'_label_config_jmespath result: {result}')
+        labels[label_config['target_label']] = str(result)
+    else:
+        logging.warning(f'_label_config_jmespath failed to match path')
 
 
 def finalize_labels(labels):
