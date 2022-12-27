@@ -29,8 +29,18 @@ SUFFIXES_PER_TYPE = {
     "enum": [],
 }
 
-
-LOOKUP_TABLES = {}
+LOOKUP_TABLES = {
+    "shelly_model_guess": {
+        "shelly1":              "SHSW-1",
+        "shellybutton1":        "SHBTN-2",
+        "shellydw2":            "SHDW-2",
+        "shellyflood":          "SHWT-1",
+        "shellyht":             "SHHT-1",
+        "shellymotion2":        "SHMOS-02",
+        "shellymotionsensor":   "SHMOS-01",
+        "shellyswitch25":       "SHSW-25",
+    },
+}
 
 
 def _read_config(config_path):
@@ -333,7 +343,18 @@ def _label_config_lookup(label_config, labels):
         lookup_table = LOOKUP_TABLES.get(label_config['lookup_table'], {})
         lookup_data = lookup_table.get(result, {})
 
-        labels[label_config['target_label']] = str(lookup_data.get(label_config['lookup_value_path'], None))
+        default_lookup_value = None
+
+        try:
+            prefix, identifier = labels["device"].split("-")
+            if prefix.startswith("shelly"):
+                default_lookup_value = LOOKUP_TABLES['shelly_model_guess'].get(prefix, None)
+        except Exception as e:
+            logging.error(f'Failed defaulting for Shelly type device: {e}')
+
+        logging.debug(f'_label_config_lookup default_lookup_value: {default_lookup_value}')
+
+        labels[label_config['target_label']] = str(lookup_data.get(label_config['lookup_value_path'], default_lookup_value))
     else:
         logging.warning(f'_label_config_lookup failed to match path')
 
