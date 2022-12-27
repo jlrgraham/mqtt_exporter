@@ -30,6 +30,9 @@ SUFFIXES_PER_TYPE = {
 }
 
 
+LOOKUP_TABLES = {}
+
+
 def _read_config(config_path):
     """Read config file from given location, and parse properties"""
 
@@ -118,6 +121,14 @@ def parse_and_validate_metric_config(metric, metrics):
                 elif lc['action'] == 'jmespath':
                     _validate_required_fields(lc, None,
                                               ['source_labels', 'target_label', 'separator', 'path',
+                                               'action'])
+                elif lc['action'] == 'set_lookup':
+                    _validate_required_fields(lc, None,
+                                              ['source_labels', 'separator', 'lookup_table', 'lookup_key_path',
+                                               'action'])
+                elif lc['action'] == 'lookup':
+                    _validate_required_fields(lc, None,
+                                              ['source_labels', 'target_label', 'separator', 'lookup_table', 'lookup_key_path', 'lookup_value_path',
                                                'action'])
                 else:
                     _validate_required_fields(lc, None,
@@ -232,10 +243,14 @@ def _label_config_match(label_config, labels):
         logging.debug(
             f"_label_config_match Action: {label_config['action']}, Keep msg: {match is not None}")
         return match is not None
-    if label_config['action'] == 'drop':
+    elif label_config['action'] == 'drop':
         logging.debug(
             f"_label_config_match Action: {label_config['action']}, Drop msg: {match is not None}")
         return match is None
+    elif label_config['action'] == 'set_lookup':
+        logging.debug(
+            f"_label_config_match Action: {label_config['action']} suppress in metrics")
+        return False
     else:
         logging.debug(
             f"_label_config_match Action: {label_config['action']} is not supported, metric is dropped")
@@ -250,6 +265,10 @@ def _apply_label_config(labels, label_configs):
             _label_config_rename(label_config, labels)
         elif label_config['action'] == 'jmespath':
             _label_config_jmespath(label_config, labels)
+        elif label_config['action'] == 'set_lookup':
+            _label_config_set_lookup(label_config, labels)
+        elif label_config['action'] == 'lookup':
+            _label_config_lookup(label_config, labels)
         else:
             if not _label_config_match(label_config, labels):
                 return False
@@ -269,13 +288,19 @@ def _label_config_rename(label_config, labels):
         labels[label_config['target_label']] = result
 
 
-def _label_config_jmespath(label_config, labels):
-    """Action 'jmespath' in label_config: Extract value for label 'target_label'"""
+def __source_and_jemspath_for_labels(label_config, labels, pathkey='path'):
     source = label_config['separator'].join(
         [labels[x] for x in label_config['source_labels']])
     source = json.loads(source)
 
-    result = jmespath.search(label_config['path'], source)
+    result = jmespath.search(label_config[pathkey], source)
+
+    return source, result
+
+
+def _label_config_jmespath(label_config, labels):
+    """Action 'jmespath' in label_config: Extract value for label 'target_label'"""
+    source, result = __source_and_jemspath_for_labels(label_config, labels)
 
     if result:
         logging.debug(f'_label_config_jmespath source: {source}')
@@ -283,6 +308,34 @@ def _label_config_jmespath(label_config, labels):
         labels[label_config['target_label']] = str(result)
     else:
         logging.warning(f'_label_config_jmespath failed to match path')
+
+
+def _label_config_set_lookup(label_config, labels):
+    """Action 'set_lookup' in label_config: Lookup value for label 'target_label'"""
+    source, result = __source_and_jemspath_for_labels(label_config, labels, pathkey='lookup_key_path')
+
+    lookup_table = label_config['lookup_table']
+
+    if lookup_table not in LOOKUP_TABLES:
+        LOOKUP_TABLES[lookup_table] = {}
+
+    LOOKUP_TABLES[lookup_table][result] = source
+
+
+def _label_config_lookup(label_config, labels):
+    """Action 'lookup' in label_config: Lookup value for label 'target_label'"""
+    source, result = __source_and_jemspath_for_labels(label_config, labels, pathkey='lookup_key_path')
+
+    if result:
+        logging.debug(f'_label_config_lookup source: {source}')
+        logging.debug(f'_label_config_lookup result: {result}')
+
+        lookup_table = LOOKUP_TABLES.get(label_config['lookup_table'], {})
+        lookup_data = lookup_table.get(result, {})
+
+        labels[label_config['target_label']] = str(lookup_data.get(label_config['lookup_value_path'], None))
+    else:
+        logging.warning(f'_label_config_lookup failed to match path')
 
 
 def finalize_labels(labels):
@@ -296,8 +349,11 @@ def finalize_labels(labels):
 def _update_metrics(metrics, msg):
     """For each metric on this topic, apply label renaming if present, and export to prometheus"""
     for metric in metrics:
-        labels = {'__topic__': metric['topic'],
-                  '__msg_topic__': msg.topic, '__value__': str(msg.payload, 'utf-8')}
+        labels = {
+            '__topic__':     metric['topic'],
+            '__msg_topic__': msg.topic,
+            '__value__':     str(msg.payload, 'utf-8'),
+        }
 
         if 'label_configs' in metric:
             # If action 'keep' in label_configs fails, or 'drop' succeeds, the metric is not updated
